@@ -1,0 +1,7 @@
+apiVersion: infra.example.com/v1
+kind: AIDeployment
+metadata:
+  name: test-model
+spec:
+  model: llama3
+  replicas: 1

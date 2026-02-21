@@ -25,14 +25,14 @@ import (
 
 // AIDeploymentSpec defines the desired state of AIDeployment
 type AIDeploymentSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of AIDeployment. Edit aideployment_types.go to remove/update
+	// Replicas is the number of model serving replicas
+	// +kubebuilder:validation:Minimum=1
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Model is the model name to deploy (e.g. "llama3", "mistral")
+	// +kubebuilder:validation:MinLength=1
+	Model string `json:"model"`
 }
 
 // AIDeploymentStatus defines the observed state of AIDeployment.

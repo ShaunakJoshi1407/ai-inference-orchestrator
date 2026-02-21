@@ -49,6 +49,8 @@ type AIDeploymentReconciler struct {
 func (r *AIDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = logf.FromContext(ctx)
 
+	log := ctrl.LoggerFrom(ctx)
+	log.Info("Reconciling AIDeployment", "name", req.NamespacedName)
 	// TODO(user): your logic here
 
 	return ctrl.Result{}, nil
