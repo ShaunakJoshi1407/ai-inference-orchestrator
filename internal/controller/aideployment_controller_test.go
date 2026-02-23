@@ -51,6 +51,10 @@ var _ = Describe("AIDeployment Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
+					Spec: infrav1.AIDeploymentSpec{
+						Model:    "llama3",
+						Replicas: func(i int32) *int32 { return &i }(1),
+					},
 					// TODO(user): Specify other spec details if needed.
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
