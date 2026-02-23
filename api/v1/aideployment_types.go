@@ -25,14 +25,21 @@ import (
 
 // AIDeploymentSpec defines the desired state of AIDeployment
 type AIDeploymentSpec struct {
+
+	// Model is the model name to deploy (e.g. "llama3", "mistral")
+	// +kubebuilder:validation:MinLength=1
+	Model string `json:"model"`
+
 	// Replicas is the number of model serving replicas
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Model is the model name to deploy (e.g. "llama3", "mistral")
-	// +kubebuilder:validation:MinLength=1
-	Model string `json:"model"`
+	// Port is the container port exposed for inference
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port *int32 `json:"port,omitempty"`
 }
 
 // AIDeploymentStatus defines the observed state of AIDeployment.

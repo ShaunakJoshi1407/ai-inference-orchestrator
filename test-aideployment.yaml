@@ -4,4 +4,5 @@ metadata:
   name: test-model
 spec:
   model: llama3
-  replicas: 1
+  replicas: 4
+  port: 8080

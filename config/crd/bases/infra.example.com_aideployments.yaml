@@ -43,6 +43,12 @@ spec:
                 description: Model is the model name to deploy (e.g. "llama3", "mistral")
                 minLength: 1
                 type: string
+              port:
+                description: Port is the container port exposed for inference
+                format: int32
+                maximum: 65535
+                minimum: 1
+                type: integer
               replicas:
                 description: Replicas is the number of model serving replicas
                 format: int32
