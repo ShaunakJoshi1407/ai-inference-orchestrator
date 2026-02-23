@@ -18,6 +18,10 @@ import (
 	infrav1 "github.com/ShaunakJoshi1407/ai-inference-orchestrator/api/v1"
 )
 
+const (
+	defaultModelImage = "nginx"
+)
+
 type AIDeploymentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -198,11 +202,11 @@ func buildDeployment(aiDeploy infrav1.AIDeployment, name, image string, replicas
 func resolveModelImage(model string) string {
 	switch model {
 	case "llama3":
-		return "nginx"
+		return "ollama/ollama"
 	case "mistral":
-		return "nginx"
+		return "ghcr.io/mistralai/mistral"
 	default:
-		return "nginx"
+		return defaultModelImage
 	}
 }
 
