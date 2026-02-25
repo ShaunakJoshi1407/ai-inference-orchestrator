@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -40,6 +41,15 @@ type AIDeploymentSpec struct {
 	// +kubebuilder:validation:Maximum=65535
 	// +optional
 	Port *int32 `json:"port,omitempty"`
+
+	// Image overrides the default resolved model image
+	// +optional
+	Image *string `json:"image,omitempty"`
+
+	// ServiceType controls how the service is exposed
+	// +kubebuilder:validation:Enum=ClusterIP;NodePort;LoadBalancer
+	// +optional
+	ServiceType *corev1.ServiceType `json:"serviceType,omitempty"`
 }
 
 // AIDeploymentStatus defines the observed state of AIDeployment.

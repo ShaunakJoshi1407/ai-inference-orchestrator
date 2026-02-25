@@ -21,6 +21,7 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -95,6 +96,16 @@ func (in *AIDeploymentSpec) DeepCopyInto(out *AIDeploymentSpec) {
 	if in.Port != nil {
 		in, out := &in.Port, &out.Port
 		*out = new(int32)
+		**out = **in
+	}
+	if in.Image != nil {
+		in, out := &in.Image, &out.Image
+		*out = new(string)
+		**out = **in
+	}
+	if in.ServiceType != nil {
+		in, out := &in.ServiceType, &out.ServiceType
+		*out = new(corev1.ServiceType)
 		**out = **in
 	}
 }

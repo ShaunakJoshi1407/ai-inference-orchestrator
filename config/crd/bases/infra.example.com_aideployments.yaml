@@ -39,6 +39,9 @@ spec:
           spec:
             description: spec defines the desired state of AIDeployment
             properties:
+              image:
+                description: Image overrides the default resolved model image
+                type: string
               model:
                 description: Model is the model name to deploy (e.g. "llama3", "mistral")
                 minLength: 1
@@ -54,6 +57,13 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              serviceType:
+                description: ServiceType controls how the service is exposed
+                enum:
+                - ClusterIP
+                - NodePort
+                - LoadBalancer
+                type: string
             required:
             - model
             type: object
