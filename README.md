@@ -1,135 +1,143 @@
-# ai-inference-orchestrator
-// TODO(user): Add simple overview of use/purpose
+# AI Inference Orchestrator (Kubernetes Operator)
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A Kubernetes-native AI model deployment control plane built using Go and controller-runtime.
 
-## Getting Started
+This project extends the Kubernetes API with a custom resource (`AIDeployment`) that declaratively manages AI model inference workloads, including Deployment and Service orchestration, drift detection, and status propagation.
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+---
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+## Overview
 
-```sh
-make docker-build docker-push IMG=<some-registry>/ai-inference-orchestrator:tag
+The AI Inference Orchestrator introduces a new Kubernetes resource:
+
+AIDeployment
+
+This custom resource allows users to declaratively specify:
+
+- Model name
+- Replica count
+- Container port
+- Service type (ClusterIP / NodePort / LoadBalancer)
+- Optional image override
+- CPU / Memory resource requirements
+
+The controller continuously reconciles the desired state into:
+
+- A Kubernetes Deployment
+- A Kubernetes Service
+
+The operator follows Kubernetes controller best practices, including idempotent reconciliation, immutable field safety, and status condition propagation.
+
+---
+
+## Architecture
+
+User → AIDeployment (CRD)  
+Controller → Reconcile Loop  
+Reconcile → Deployment + Service  
+Status → Conditions updated from Deployment  
+Events → Emitted via EventRecorder  
+
+The controller:
+
+- Watches AIDeployment
+- Owns Deployment
+- Owns Service
+- Performs safe drift detection
+- Updates only mutable fields
+- Propagates Deployment conditions into CRD status
+
+---
+
+## API Specification
+
+Example:
+
+```yaml
+apiVersion: infra.example.com/v1
+kind: AIDeployment
+metadata:
+  name: test-model
+spec:
+  model: llama3
+  replicas: 4
+  port: 8080
+  serviceType: ClusterIP
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+## Local Development
 
-**Install the CRDs into the cluster:**
+Install CRD into cluster:
 
-```sh
+```
 make install
 ```
-
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
-
-```sh
-make deploy IMG=<some-registry>/ai-inference-orchestrator:tag
+Run controller locally:
+```
+make run
+```
+Apply test resource:
+```
+kubectl apply -f test-aideployment.yaml
+```
+Inspect resources:
+```
+kubectl get deployments
+kubectl get svc
+kubectl describe aideployment test-model
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+## Features (v0.1.0)
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+Custom CRD with OpenAPI schema validation
 
-```sh
-kubectl apply -k config/samples/
-```
+Status subresource enabled
 
->**NOTE**: Ensure that the samples has default values to test it out.
+Deployment reconciliation
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+Service reconciliation
 
-```sh
-kubectl delete -k config/samples/
-```
+Drift detection (replicas, image, resources)
 
-**Delete the APIs(CRDs) from the cluster:**
+Immutable-safe update logic
 
-```sh
-make uninstall
-```
+Condition propagation from Deployment
 
-**UnDeploy the controller from the cluster:**
+Kubernetes Event emission
 
-```sh
-make undeploy
-```
+Controller-runtime based architecture
 
-## Project Distribution
+CI integration (lint + controller tests)
 
-Following the options to release and provide this solution to the users.
+## Roadmap
 
-### By providing a bundle with all YAML files
+### Week 2
 
-1. Build the installer for the image built and published in the registry:
+Horizontal Pod Autoscaler integration
 
-```sh
-make build-installer IMG=<some-registry>/ai-inference-orchestrator:tag
-```
+Metrics endpoint
 
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
+Observability enhancements
 
-2. Using the installer
+### Week 3
 
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
+CLI for model deployment
 
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/ai-inference-orchestrator/<tag or branch>/dist/install.yaml
-```
+MCP (Model Context Protocol) server
 
-### By providing a Helm Chart
+Plain-English model deployment interface
 
-1. Build the chart using the optional helm plugin
+### Week 4
 
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
+Advanced scaling policies
 
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
+AI workload scheduling enhancements
 
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
-
-## License
-
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Production hardening

@@ -7,11 +7,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -19,23 +19,20 @@ import (
 	infrav1 "github.com/ShaunakJoshi1407/ai-inference-orchestrator/api/v1"
 )
 
-const defaultModelImage = "nginx"
-
 type AIDeploymentReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // RBAC
 // +kubebuilder:rbac:groups=infra.example.com,resources=aideployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infra.example.com,resources=aideployments/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=infra.example.com,resources=aideployments/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *AIDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-
-	log := ctrl.LoggerFrom(ctx)
 
 	var aiDeploy infrav1.AIDeployment
 	if err := r.Get(ctx, req.NamespacedName, &aiDeploy); err != nil {
@@ -50,171 +47,150 @@ func (r *AIDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		replicas = *aiDeploy.Spec.Replicas
 	}
 
-	port := int32(8000)
+	port := int32(8080)
 	if aiDeploy.Spec.Port != nil {
 		port = *aiDeploy.Spec.Port
 	}
 
-	image := resolveModelImage(aiDeploy.Spec.Model)
-	if aiDeploy.Spec.Image != nil {
-		image = *aiDeploy.Spec.Image
-	}
-
-	serviceType := corev1.ServiceTypeClusterIP
-	if aiDeploy.Spec.ServiceType != nil {
-		serviceType = *aiDeploy.Spec.ServiceType
-	}
-
 	deploymentName := aiDeploy.Name + "-deployment"
-	serviceName := aiDeploy.Name + "-service"
 
-	// --------------------
-	// Deployment Reconcile
-	// --------------------
-
-	var existingDeploy appsv1.Deployment
+	var existingDeployment appsv1.Deployment
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      deploymentName,
 		Namespace: aiDeploy.Namespace,
-	}, &existingDeploy)
-
-	desiredDeploy := buildDeployment(aiDeploy, deploymentName, image, replicas, port)
+	}, &existingDeployment)
 
 	if err != nil && errors.IsNotFound(err) {
 
-		if err := ctrl.SetControllerReference(&aiDeploy, &desiredDeploy, r.Scheme); err != nil {
+		deployment := buildDeployment(&aiDeploy, replicas, port)
+
+		if err := ctrl.SetControllerReference(&aiDeploy, deployment, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		if err := r.Create(ctx, &desiredDeploy); err != nil {
+		if err := r.Create(ctx, deployment); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{Requeue: true}, nil
+		r.Recorder.Event(&aiDeploy,
+			corev1.EventTypeNormal,
+			"DeploymentCreated",
+			"Deployment created successfully")
+
+		return ctrl.Result{}, nil
 	}
 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if !reflect.DeepEqual(existingDeploy.Spec.Replicas, desiredDeploy.Spec.Replicas) ||
-		existingDeploy.Spec.Template.Spec.Containers[0].Image != desiredDeploy.Spec.Template.Spec.Containers[0].Image {
+	// -------- SAFE DRIFT UPDATE --------
 
-		existingDeploy.Spec = desiredDeploy.Spec
+	updated := false
 
-		if err := r.Update(ctx, &existingDeploy); err != nil {
+	// Update replicas
+	if *existingDeployment.Spec.Replicas != replicas {
+		existingDeployment.Spec.Replicas = &replicas
+		updated = true
+	}
+
+	container := &existingDeployment.Spec.Template.Spec.Containers[0]
+
+	desiredImage := resolveModelImage(&aiDeploy)
+	if container.Image != desiredImage {
+		container.Image = desiredImage
+		updated = true
+	}
+
+	// Update resources
+	if aiDeploy.Spec.Resources != nil &&
+		!reflect.DeepEqual(container.Resources, *aiDeploy.Spec.Resources) {
+
+		container.Resources = *aiDeploy.Spec.Resources
+		updated = true
+	}
+
+	if updated {
+		if err := r.Update(ctx, &existingDeployment); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{Requeue: true}, nil
+		r.Recorder.Event(&aiDeploy,
+			corev1.EventTypeNormal,
+			"DeploymentUpdated",
+			"Deployment updated to match desired state")
 	}
 
-	// --------------------
-	// Service Reconcile
-	// --------------------
+	// -------- SERVICE --------
 
-	var existingSvc corev1.Service
+	serviceName := aiDeploy.Name + "-service"
+
+	var existingService corev1.Service
 	err = r.Get(ctx, types.NamespacedName{
 		Name:      serviceName,
 		Namespace: aiDeploy.Namespace,
-	}, &existingSvc)
-
-	desiredSvc := buildService(aiDeploy, serviceName, deploymentName, port, serviceType)
+	}, &existingService)
 
 	if err != nil && errors.IsNotFound(err) {
 
-		if err := ctrl.SetControllerReference(&aiDeploy, &desiredSvc, r.Scheme); err != nil {
+		service := buildService(&aiDeploy, port)
+
+		if err := ctrl.SetControllerReference(&aiDeploy, service, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		if err := r.Create(ctx, &desiredSvc); err != nil {
+		if err := r.Create(ctx, service); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{Requeue: true}, nil
+		r.Recorder.Event(&aiDeploy,
+			corev1.EventTypeNormal,
+			"ServiceCreated",
+			"Service created successfully")
 	}
 
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if existingSvc.Spec.Type != desiredSvc.Spec.Type ||
-		!reflect.DeepEqual(existingSvc.Spec.Ports, desiredSvc.Spec.Ports) {
-
-		existingSvc.Spec.Type = desiredSvc.Spec.Type
-		existingSvc.Spec.Ports = desiredSvc.Spec.Ports
-
-		if err := r.Update(ctx, &existingSvc); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// --------------------
-	// Status Mapping
-	// --------------------
-
-	for _, cond := range existingDeploy.Status.Conditions {
-
-		switch cond.Type {
-
-		case appsv1.DeploymentAvailable:
-			meta.SetStatusCondition(&aiDeploy.Status.Conditions, metav1.Condition{
-				Type:               "Available",
-				Status:             metav1.ConditionStatus(cond.Status),
-				Reason:             cond.Reason,
-				Message:            cond.Message,
-				LastTransitionTime: metav1.Now(),
-			})
-
-		case appsv1.DeploymentProgressing:
-			meta.SetStatusCondition(&aiDeploy.Status.Conditions, metav1.Condition{
-				Type:               "Progressing",
-				Status:             metav1.ConditionStatus(cond.Status),
-				Reason:             cond.Reason,
-				Message:            cond.Message,
-				LastTransitionTime: metav1.Now(),
-			})
-		}
-	}
-
-	if err := r.Status().Update(ctx, &aiDeploy); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	log.Info("Successfully reconciled AIDeployment")
+	updateStatusFromDeployment(&aiDeploy, &existingDeployment)
+	_ = r.Status().Update(ctx, &aiDeploy)
 
 	return ctrl.Result{}, nil
 }
 
-func buildDeployment(aiDeploy infrav1.AIDeployment, name, image string, replicas, port int32) appsv1.Deployment {
-	return appsv1.Deployment{
+func (r *AIDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("aideployment-controller")
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&infrav1.AIDeployment{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Complete(r)
+}
+
+func buildDeployment(aiDeploy *infrav1.AIDeployment, replicas int32, port int32) *appsv1.Deployment {
+
+	labels := map[string]string{
+		"app": aiDeploy.Name,
+	}
+
+	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      aiDeploy.Name + "-deployment",
 			Namespace: aiDeploy.Namespace,
-			Labels: map[string]string{
-				"app": name,
-			},
+			Labels:    labels,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": name,
-				},
+				MatchLabels: labels,
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": name,
-					},
+					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
 							Name:  "model",
-							Image: image,
+							Image: resolveModelImage(aiDeploy),
 							Ports: []corev1.ContainerPort{
 								{ContainerPort: port},
 							},
@@ -226,49 +202,52 @@ func buildDeployment(aiDeploy infrav1.AIDeployment, name, image string, replicas
 	}
 }
 
-func buildService(aiDeploy infrav1.AIDeployment, name, deploymentName string, port int32, svcType corev1.ServiceType) corev1.Service {
-	return corev1.Service{
+func buildService(aiDeploy *infrav1.AIDeployment, port int32) *corev1.Service {
+
+	serviceType := corev1.ServiceTypeClusterIP
+	if aiDeploy.Spec.ServiceType != nil {
+		serviceType = *aiDeploy.Spec.ServiceType
+	}
+
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      aiDeploy.Name + "-service",
 			Namespace: aiDeploy.Namespace,
-			Labels: map[string]string{
-				"app": deploymentName,
-			},
 		},
 		Spec: corev1.ServiceSpec{
-			Type: svcType,
+			Type: serviceType,
 			Selector: map[string]string{
-				"app": deploymentName,
+				"app": aiDeploy.Name,
 			},
 			Ports: []corev1.ServicePort{
 				{
 					Port:       port,
-					TargetPort: intstrFromInt32(port),
+					TargetPort: intstr.FromInt(int(port)),
 				},
 			},
 		},
 	}
 }
 
-func resolveModelImage(model string) string {
-	switch model {
-	case "llama3":
-		return "ollama/ollama"
-	case "mistral":
-		return "ghcr.io/mistralai/mistral"
-	default:
-		return defaultModelImage
+func resolveModelImage(aiDeploy *infrav1.AIDeployment) string {
+	if aiDeploy.Spec.Image != nil {
+		return *aiDeploy.Spec.Image
 	}
+	return "nginx"
 }
 
-func intstrFromInt32(i int32) intstr.IntOrString {
-	return intstr.FromInt(int(i))
-}
+func updateStatusFromDeployment(aiDeploy *infrav1.AIDeployment, deploy *appsv1.Deployment) {
 
-func (r *AIDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrav1.AIDeployment{}).
-		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Service{}).
-		Complete(r)
+	aiDeploy.Status.Conditions = nil
+
+	for _, cond := range deploy.Status.Conditions {
+		aiDeploy.Status.Conditions = append(aiDeploy.Status.Conditions, metav1.Condition{
+			Type:               string(cond.Type),
+			Status:             metav1.ConditionStatus(cond.Status),
+			Reason:             cond.Reason,
+			Message:            cond.Message,
+			LastTransitionTime: cond.LastTransitionTime,
+			ObservedGeneration: aiDeploy.Generation,
+		})
+	}
 }
