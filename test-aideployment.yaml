@@ -3,6 +3,18 @@ kind: AIDeployment
 metadata:
   name: test-model
 spec:
-  model: llama3
-  replicas: 4
+  model: tinyllama
+  replicas: 1
   port: 8080
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilization: 20

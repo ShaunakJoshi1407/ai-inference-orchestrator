@@ -38,6 +38,25 @@ spec:
           spec:
             description: AIDeploymentSpec defines the desired state of AIDeployment
             properties:
+              autoscaling:
+                description: Autoscaling configuration
+                properties:
+                  enabled:
+                    description: Enabled toggles HPA creation
+                    type: boolean
+                  maxReplicas:
+                    description: Maximum number of replicas
+                    format: int32
+                    type: integer
+                  minReplicas:
+                    description: Minimum number of replicas
+                    format: int32
+                    type: integer
+                  targetCPUUtilization:
+                    description: Target CPU utilization percentage
+                    format: int32
+                    type: integer
+                type: object
               image:
                 description: Image overrides the default resolved model image
                 type: string

@@ -2,252 +2,330 @@ package controller
 
 import (
 	"context"
-	"reflect"
+	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/tools/record"
-
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	infrav1 "github.com/ShaunakJoshi1407/ai-inference-orchestrator/api/v1"
 )
 
 type AIDeploymentReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme *runtime.Scheme
 }
 
-// RBAC
-// +kubebuilder:rbac:groups=infra.example.com,resources=aideployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=infra.example.com,resources=aideployments/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-
 func (r *AIDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 
 	var aiDeploy infrav1.AIDeployment
 	if err := r.Get(ctx, req.NamespacedName, &aiDeploy); err != nil {
-		if errors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-
-	replicas := int32(1)
-	if aiDeploy.Spec.Replicas != nil {
-		replicas = *aiDeploy.Spec.Replicas
-	}
-
-	port := int32(8080)
-	if aiDeploy.Spec.Port != nil {
-		port = *aiDeploy.Spec.Port
-	}
-
-	deploymentName := aiDeploy.Name + "-deployment"
-
-	var existingDeployment appsv1.Deployment
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      deploymentName,
-		Namespace: aiDeploy.Namespace,
-	}, &existingDeployment)
-
-	if err != nil && errors.IsNotFound(err) {
-
-		deployment := buildDeployment(&aiDeploy, replicas, port)
-
-		if err := ctrl.SetControllerReference(&aiDeploy, deployment, r.Scheme); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		if err := r.Create(ctx, deployment); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		r.Recorder.Event(&aiDeploy,
-			corev1.EventTypeNormal,
-			"DeploymentCreated",
-			"Deployment created successfully")
-
-		return ctrl.Result{}, nil
-	}
-
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// -------- SAFE DRIFT UPDATE --------
-
-	updated := false
-
-	// Update replicas
-	if *existingDeployment.Spec.Replicas != replicas {
-		existingDeployment.Spec.Replicas = &replicas
-		updated = true
-	}
-
-	container := &existingDeployment.Spec.Template.Spec.Containers[0]
-
-	desiredImage := resolveModelImage(&aiDeploy)
-	if container.Image != desiredImage {
-		container.Image = desiredImage
-		updated = true
-	}
-
-	// Update resources
-	if aiDeploy.Spec.Resources != nil &&
-		!reflect.DeepEqual(container.Resources, *aiDeploy.Spec.Resources) {
-
-		container.Resources = *aiDeploy.Spec.Resources
-		updated = true
-	}
-
-	if updated {
-		if err := r.Update(ctx, &existingDeployment); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		r.Recorder.Event(&aiDeploy,
-			corev1.EventTypeNormal,
-			"DeploymentUpdated",
-			"Deployment updated to match desired state")
-	}
-
-	// -------- SERVICE --------
-
-	serviceName := aiDeploy.Name + "-service"
-
-	var existingService corev1.Service
-	err = r.Get(ctx, types.NamespacedName{
-		Name:      serviceName,
-		Namespace: aiDeploy.Namespace,
-	}, &existingService)
-
-	if err != nil && errors.IsNotFound(err) {
-
-		service := buildService(&aiDeploy, port)
-
-		if err := ctrl.SetControllerReference(&aiDeploy, service, r.Scheme); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		if err := r.Create(ctx, service); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		r.Recorder.Event(&aiDeploy,
-			corev1.EventTypeNormal,
-			"ServiceCreated",
-			"Service created successfully")
-	}
-
-	updateStatusFromDeployment(&aiDeploy, &existingDeployment)
-	_ = r.Status().Update(ctx, &aiDeploy)
-
-	return ctrl.Result{}, nil
-}
-
-func (r *AIDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.Recorder = mgr.GetEventRecorderFor("aideployment-controller")
-
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrav1.AIDeployment{}).
-		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Service{}).
-		Complete(r)
-}
-
-func buildDeployment(aiDeploy *infrav1.AIDeployment, replicas int32, port int32) *appsv1.Deployment {
 
 	labels := map[string]string{
 		"app": aiDeploy.Name,
 	}
 
-	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      aiDeploy.Name + "-deployment",
-			Namespace: aiDeploy.Namespace,
-			Labels:    labels,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
+	// -----------------------------------------------------
+	// Resource Defaults
+	// -----------------------------------------------------
+	var containerResources corev1.ResourceRequirements
+
+	if aiDeploy.Spec.Resources != nil {
+		containerResources = *aiDeploy.Spec.Resources
+	} else {
+		containerResources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("200m"),
+				corev1.ResourceMemory: resource.MustParse("256Mi"),
 			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			},
+		}
+	}
+
+	// -----------------------------------------------------
+	// Deployment (Conflict-Safe Production Pattern)
+	// -----------------------------------------------------
+	deploymentName := fmt.Sprintf("%s-deployment", aiDeploy.Name)
+
+	var deployment appsv1.Deployment
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      deploymentName,
+		Namespace: aiDeploy.Namespace,
+	}, &deployment)
+
+	if apierrors.IsNotFound(err) {
+
+		newDeployment := appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      deploymentName,
+				Namespace: aiDeploy.Namespace,
+				Labels:    labels,
+			},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
 				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "model",
-							Image: resolveModelImage(aiDeploy),
-							Ports: []corev1.ContainerPort{
-								{ContainerPort: port},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: labels,
+					},
+					Spec: corev1.PodSpec{
+						Volumes: []corev1.Volume{
+							{
+								Name: "ollama-models",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							},
+						},
+						InitContainers: []corev1.Container{
+							{
+								Name:    "model-pull",
+								Image:   "ollama/ollama:latest",
+								Command: []string{"sh"},
+								Args: []string{
+									"-c",
+									fmt.Sprintf("ollama serve & sleep 5 && ollama pull %s", aiDeploy.Spec.Model),
+								},
+								Env: []corev1.EnvVar{
+									{Name: "OLLAMA_HOST", Value: "0.0.0.0"},
+									{Name: "OLLAMA_MODELS", Value: "/models"},
+								},
+								VolumeMounts: []corev1.VolumeMount{
+									{Name: "ollama-models", MountPath: "/models"},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:    "ollama",
+								Image:   "ollama/ollama:latest",
+								Command: []string{"ollama"},
+								Args:    []string{"serve"},
+								Ports: []corev1.ContainerPort{
+									{ContainerPort: 11434},
+								},
+								Env: []corev1.EnvVar{
+									{Name: "OLLAMA_HOST", Value: "0.0.0.0"},
+									{Name: "OLLAMA_MODELS", Value: "/models"},
+								},
+								Resources: containerResources,
+								VolumeMounts: []corev1.VolumeMount{
+									{Name: "ollama-models", MountPath: "/models"},
+								},
 							},
 						},
 					},
 				},
 			},
-		},
-	}
-}
+		}
 
-func buildService(aiDeploy *infrav1.AIDeployment, port int32) *corev1.Service {
+		if aiDeploy.Spec.Autoscaling == nil || !aiDeploy.Spec.Autoscaling.Enabled {
+			replicas := int32(1)
+			if aiDeploy.Spec.Replicas != nil {
+				replicas = *aiDeploy.Spec.Replicas
+			}
+			newDeployment.Spec.Replicas = &replicas
+		}
 
-	serviceType := corev1.ServiceTypeClusterIP
-	if aiDeploy.Spec.ServiceType != nil {
-		serviceType = *aiDeploy.Spec.ServiceType
-	}
+		if err := ctrl.SetControllerReference(&aiDeploy, &newDeployment, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
 
-	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      aiDeploy.Name + "-service",
-			Namespace: aiDeploy.Namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Type: serviceType,
-			Selector: map[string]string{
-				"app": aiDeploy.Name,
-			},
-			Ports: []corev1.ServicePort{
-				{
-					Port:       port,
-					TargetPort: intstr.FromInt(int(port)),
+		if err := r.Create(ctx, &newDeployment); err != nil {
+			return ctrl.Result{}, err
+		}
+
+	} else if err != nil {
+		return ctrl.Result{}, err
+
+	} else {
+
+		original := deployment.DeepCopy()
+
+		deployment.Labels = labels
+		deployment.Spec.Template.Labels = labels
+
+		if aiDeploy.Spec.Autoscaling == nil || !aiDeploy.Spec.Autoscaling.Enabled {
+			replicas := int32(1)
+			if aiDeploy.Spec.Replicas != nil {
+				replicas = *aiDeploy.Spec.Replicas
+			}
+			deployment.Spec.Replicas = &replicas
+		}
+
+		deployment.Spec.Template.Spec.Volumes = []corev1.Volume{
+			{
+				Name: "ollama-models",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				},
 			},
-		},
+		}
+
+		deployment.Spec.Template.Spec.InitContainers = []corev1.Container{
+			{
+				Name:    "model-pull",
+				Image:   "ollama/ollama:latest",
+				Command: []string{"sh"},
+				Args: []string{
+					"-c",
+					fmt.Sprintf("ollama serve & sleep 5 && ollama pull %s", aiDeploy.Spec.Model),
+				},
+				Env: []corev1.EnvVar{
+					{Name: "OLLAMA_HOST", Value: "0.0.0.0"},
+					{Name: "OLLAMA_MODELS", Value: "/models"},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "ollama-models", MountPath: "/models"},
+				},
+			},
+		}
+
+		deployment.Spec.Template.Spec.Containers = []corev1.Container{
+			{
+				Name:    "ollama",
+				Image:   "ollama/ollama:latest",
+				Command: []string{"ollama"},
+				Args:    []string{"serve"},
+				Ports: []corev1.ContainerPort{
+					{ContainerPort: 11434},
+				},
+				Env: []corev1.EnvVar{
+					{Name: "OLLAMA_HOST", Value: "0.0.0.0"},
+					{Name: "OLLAMA_MODELS", Value: "/models"},
+				},
+				Resources: containerResources,
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "ollama-models", MountPath: "/models"},
+				},
+			},
+		}
+
+		if err := r.Patch(ctx, &deployment, client.MergeFrom(original)); err != nil {
+			logger.Error(err, "Failed to patch Deployment")
+			return ctrl.Result{}, err
+		}
 	}
+
+	// -----------------------------------------------------
+	// Service (Patch Pattern)
+	// -----------------------------------------------------
+	serviceName := fmt.Sprintf("%s-service", aiDeploy.Name)
+
+	var service corev1.Service
+	err = r.Get(ctx, client.ObjectKey{
+		Name:      serviceName,
+		Namespace: aiDeploy.Namespace,
+	}, &service)
+
+	if apierrors.IsNotFound(err) {
+
+		newService := corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      serviceName,
+				Namespace: aiDeploy.Namespace,
+				Labels:    labels,
+			},
+			Spec: corev1.ServiceSpec{
+				Type:     corev1.ServiceTypeClusterIP,
+				Selector: labels,
+				Ports: []corev1.ServicePort{
+					{
+						Port:       8080,
+						TargetPort: intstr.FromInt(11434),
+					},
+				},
+			},
+		}
+
+		if err := ctrl.SetControllerReference(&aiDeploy, &newService, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := r.Create(ctx, &newService); err != nil {
+			return ctrl.Result{}, err
+		}
+
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// -----------------------------------------------------
+	// HPA
+	// -----------------------------------------------------
+	if aiDeploy.Spec.Autoscaling != nil && aiDeploy.Spec.Autoscaling.Enabled {
+
+		hpaName := fmt.Sprintf("%s-hpa", aiDeploy.Name)
+
+		var hpa autoscalingv2.HorizontalPodAutoscaler
+		err := r.Get(ctx, client.ObjectKey{
+			Name:      hpaName,
+			Namespace: aiDeploy.Namespace,
+		}, &hpa)
+
+		if apierrors.IsNotFound(err) {
+
+			newHPA := autoscalingv2.HorizontalPodAutoscaler{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      hpaName,
+					Namespace: aiDeploy.Namespace,
+				},
+				Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+					ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       deploymentName,
+					},
+					MinReplicas: aiDeploy.Spec.Autoscaling.MinReplicas,
+					MaxReplicas: aiDeploy.Spec.Autoscaling.MaxReplicas,
+					Metrics: []autoscalingv2.MetricSpec{
+						{
+							Type: autoscalingv2.ResourceMetricSourceType,
+							Resource: &autoscalingv2.ResourceMetricSource{
+								Name: corev1.ResourceCPU,
+								Target: autoscalingv2.MetricTarget{
+									Type:               autoscalingv2.UtilizationMetricType,
+									AverageUtilization: &aiDeploy.Spec.Autoscaling.TargetCPUUtilization,
+								},
+							},
+						},
+					},
+				},
+			}
+
+			if err := ctrl.SetControllerReference(&aiDeploy, &newHPA, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			if err := r.Create(ctx, &newHPA); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
+	return ctrl.Result{}, nil
 }
 
-func resolveModelImage(aiDeploy *infrav1.AIDeployment) string {
-	if aiDeploy.Spec.Image != nil {
-		return *aiDeploy.Spec.Image
-	}
-	return "nginx"
-}
-
-func updateStatusFromDeployment(aiDeploy *infrav1.AIDeployment, deploy *appsv1.Deployment) {
-
-	aiDeploy.Status.Conditions = nil
-
-	for _, cond := range deploy.Status.Conditions {
-		aiDeploy.Status.Conditions = append(aiDeploy.Status.Conditions, metav1.Condition{
-			Type:               string(cond.Type),
-			Status:             metav1.ConditionStatus(cond.Status),
-			Reason:             cond.Reason,
-			Message:            cond.Message,
-			LastTransitionTime: cond.LastTransitionTime,
-			ObservedGeneration: aiDeploy.Generation,
-		})
-	}
+func (r *AIDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&infrav1.AIDeployment{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
+		Complete(r)
 }

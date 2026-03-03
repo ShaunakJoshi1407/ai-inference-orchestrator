@@ -7,13 +7,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - events
-  verbs:
-  - create
-  - patch
-- apiGroups:
-  - ""
-  resources:
   - services
   verbs:
   - create
@@ -47,6 +40,12 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - infra.example.com
+  resources:
+  - aideployments/finalizers
+  verbs:
+  - update
 - apiGroups:
   - infra.example.com
   resources:

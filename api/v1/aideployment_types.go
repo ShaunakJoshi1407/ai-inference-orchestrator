@@ -10,6 +10,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type AutoscalingSpec struct {
+	// Enabled toggles HPA creation
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Minimum number of replicas
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+
+	// Maximum number of replicas
+	MaxReplicas int32 `json:"maxReplicas,omitempty"`
+
+	// Target CPU utilization percentage
+	TargetCPUUtilization int32 `json:"targetCPUUtilization,omitempty"`
+}
+
 // AIDeploymentSpec defines the desired state of AIDeployment
 type AIDeploymentSpec struct {
 
@@ -40,6 +54,10 @@ type AIDeploymentSpec struct {
 	// Resources defines CPU/Memory requests and limits
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Autoscaling configuration
+	// +optional
+	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
 }
 
 // AIDeploymentStatus defines the observed state of AIDeployment.
