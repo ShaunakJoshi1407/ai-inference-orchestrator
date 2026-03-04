@@ -9,12 +9,12 @@ spec:
   resources:
     requests:
       cpu: "200m"
-      memory: "256Mi"
+      memory: "1Gi"
     limits:
-      cpu: "500m"
-      memory: "512Mi"
+      cpu: "2000m"
+      memory: "2Gi"
   autoscaling:
     enabled: true
     minReplicas: 1
     maxReplicas: 3
-    targetCPUUtilization: 20
+    targetCPUUtilization: 60

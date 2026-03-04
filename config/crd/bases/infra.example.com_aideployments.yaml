@@ -39,44 +39,35 @@ spec:
             description: AIDeploymentSpec defines the desired state of AIDeployment
             properties:
               autoscaling:
-                description: Autoscaling configuration
                 properties:
                   enabled:
-                    description: Enabled toggles HPA creation
                     type: boolean
                   maxReplicas:
-                    description: Maximum number of replicas
                     format: int32
                     type: integer
                   minReplicas:
-                    description: Minimum number of replicas
                     format: int32
                     type: integer
                   targetCPUUtilization:
-                    description: Target CPU utilization percentage
                     format: int32
                     type: integer
                 type: object
               image:
-                description: Image overrides the default resolved model image
                 type: string
               model:
-                description: Model is the model name to deploy (e.g. "llama3", "mistral")
                 minLength: 1
                 type: string
               port:
-                description: Port is the container port exposed for inference
                 format: int32
                 maximum: 65535
                 minimum: 1
                 type: integer
               replicas:
-                description: Replicas is the number of model serving replicas
                 format: int32
                 minimum: 1
                 type: integer
               resources:
-                description: Resources defines CPU/Memory requests and limits
+                description: ResourceRequirements describes the compute resource requirements.
                 properties:
                   claims:
                     description: |-
@@ -135,7 +126,7 @@ spec:
                     type: object
                 type: object
               serviceType:
-                description: ServiceType controls how the service is exposed
+                description: Service Type string describes ingress methods for a service
                 enum:
                 - ClusterIP
                 - NodePort
@@ -145,8 +136,11 @@ spec:
             - model
             type: object
           status:
-            description: AIDeploymentStatus defines the observed state of AIDeployment.
+            description: AIDeploymentStatus defines observed state
             properties:
+              availableReplicas:
+                format: int32
+                type: integer
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -206,6 +200,9 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              replicas:
+                format: int32
+                type: integer
             type: object
         required:
         - spec
