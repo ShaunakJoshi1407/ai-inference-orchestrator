@@ -8,7 +8,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      app.kubernetes.io/name: ai-inference-orchestrator
   namespaceSelector:
     matchNames:
       - ai-inference-orchestrator-system
