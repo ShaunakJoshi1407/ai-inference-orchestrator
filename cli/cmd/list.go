@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ShaunakJoshi1407/ai-inference-orchestrator/cli/internal/k8s"
+	"github.com/ShaunakJoshi1407/ai-inference-orchestrator/pkg/k8s"
 )
 
 var listCmd = &cobra.Command{
