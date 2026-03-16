@@ -6,21 +6,21 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/spf13/cobra"
 
-	"github.com/ShaunakJoshi1407/ai-inference-orchestrator/pkg/k8s"
-
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"github.com/ShaunakJoshi1407/ai-inference-orchestrator/cli/internal/k8s"
 )
 
 var logsCmd = &cobra.Command{
-	Use:   "logs [name]",
-	Short: "Show logs for a deployed AI model",
+	Use:   "logs [model]",
+	Short: "Show logs for a deployed model",
 	Args:  cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 
-		name := args[0]
+		model := args[0]
 
 		k8sClient, err := k8s.GetClient()
 		if err != nil {
@@ -34,7 +34,7 @@ var logsCmd = &cobra.Command{
 			podList,
 			client.InNamespace("default"),
 			client.MatchingLabels{
-				"app": name,
+				"app": model,
 			},
 		)
 
@@ -43,15 +43,12 @@ var logsCmd = &cobra.Command{
 		}
 
 		if len(podList.Items) == 0 {
-			return fmt.Errorf("no pods found for model %s", name)
+			return fmt.Errorf("no pods found for model %s", model)
 		}
 
-		pod := podList.Items[0]
-
-		fmt.Println("Pod:", pod.Name)
-		fmt.Println()
-		fmt.Println("To stream logs run:")
-		fmt.Printf("kubectl logs -f %s\n", pod.Name)
+		for _, pod := range podList.Items {
+			fmt.Println("Pod:", pod.Name)
+		}
 
 		return nil
 	},
