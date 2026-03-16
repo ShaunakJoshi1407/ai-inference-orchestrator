@@ -288,25 +288,9 @@ curl http://localhost:8080/metrics
 * Business-level metrics exposure
 * Verified autoscaling under load
 
----
-
-# Roadmap
-
-## Week 3
-
-* Prometheus + ServiceMonitor integration
-* Grafana dashboard
-* CLI for model deployment
-* MCP (Model Context Protocol) server
-* Natural-language deployment interface
-
-## Week 4
-
-* Advanced scaling policies
-* Custom metrics autoscaling
-* AI workload scheduling enhancements
-* Production hardening
-* Multi-tenant support
+## v1.0
+* Added CLI and MCP server support
+* Fixed reconciliation logic
 
 ---
 
