@@ -36,4 +36,4 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          args: --timeout=5m --disable-all --enable=govet --enable=staticcheck --enable=ineffassign --enable=unused
+          args: --timeout=5m --enable=govet --enable=staticcheck --enable=ineffassign --enable=unused
