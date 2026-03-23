@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 )
@@ -11,7 +12,7 @@ type Tool struct {
 	Handler     ToolHandler
 }
 
-type ToolHandler func(map[string]interface{}) (interface{}, error)
+type ToolHandler func(ctx context.Context, args map[string]interface{}) (interface{}, error)
 
 type Server struct {
 	tools map[string]Tool
@@ -56,7 +57,7 @@ func (s *Server) handleTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := tool.Handler(req.Args)
+	result, err := tool.Handler(r.Context(), req.Args)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

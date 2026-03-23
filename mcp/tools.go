@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	infrav1 "github.com/ShaunakJoshi1407/ai-inference-orchestrator/api/v1"
 	"github.com/ShaunakJoshi1407/ai-inference-orchestrator/pkg/k8s"
@@ -43,9 +44,24 @@ func (s *Server) registerTools() {
 	}
 }
 
-func deployModel(args map[string]interface{}) (interface{}, error) {
+func modelFromArgs(args map[string]interface{}) (string, error) {
+	v, ok := args["model"]
+	if !ok {
+		return "", fmt.Errorf("model argument is required")
+	}
+	model, ok := v.(string)
+	if !ok || model == "" {
+		return "", fmt.Errorf("model must be a non-empty string")
+	}
+	return model, nil
+}
 
-	model := args["model"].(string)
+func deployModel(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+
+	model, err := modelFromArgs(args)
+	if err != nil {
+		return nil, err
+	}
 
 	replicas := int32(1)
 
@@ -85,8 +101,7 @@ func deployModel(args map[string]interface{}) (interface{}, error) {
 		},
 	}
 
-	err = k8sClient.Create(context.Background(), aiDeploy)
-	if err != nil {
+	if err := k8sClient.Create(ctx, aiDeploy); err != nil {
 		return nil, err
 	}
 
@@ -97,9 +112,13 @@ func deployModel(args map[string]interface{}) (interface{}, error) {
 	}, nil
 }
 
-func scaleModel(args map[string]interface{}) (interface{}, error) {
+func scaleModel(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 
-	model := args["model"].(string)
+	model, err := modelFromArgs(args)
+	if err != nil {
+		return nil, err
+	}
+
 	var replicas int32
 
 	switch v := args["replicas"].(type) {
@@ -121,20 +140,13 @@ func scaleModel(args map[string]interface{}) (interface{}, error) {
 
 	ai := &infrav1.AIDeployment{}
 
-	err = k8sClient.Get(
-		context.Background(),
-		clientKey(model),
-		ai,
-	)
-
-	if err != nil {
+	if err := k8sClient.Get(ctx, clientKey(model), ai); err != nil {
 		return nil, err
 	}
 
 	ai.Spec.Replicas = &replicas
 
-	err = k8sClient.Update(context.Background(), ai)
-	if err != nil {
+	if err := k8sClient.Update(ctx, ai); err != nil {
 		return nil, err
 	}
 
@@ -145,9 +157,12 @@ func scaleModel(args map[string]interface{}) (interface{}, error) {
 	}, nil
 }
 
-func deleteModel(args map[string]interface{}) (interface{}, error) {
+func deleteModel(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 
-	model := args["model"].(string)
+	model, err := modelFromArgs(args)
+	if err != nil {
+		return nil, err
+	}
 
 	k8sClient, err := k8s.GetClient()
 	if err != nil {
@@ -156,18 +171,11 @@ func deleteModel(args map[string]interface{}) (interface{}, error) {
 
 	ai := &infrav1.AIDeployment{}
 
-	err = k8sClient.Get(
-		context.Background(),
-		clientKey(model),
-		ai,
-	)
-
-	if err != nil {
+	if err := k8sClient.Get(ctx, clientKey(model), ai); err != nil {
 		return nil, err
 	}
 
-	err = k8sClient.Delete(context.Background(), ai)
-	if err != nil {
+	if err := k8sClient.Delete(ctx, ai); err != nil {
 		return nil, err
 	}
 
@@ -177,7 +185,7 @@ func deleteModel(args map[string]interface{}) (interface{}, error) {
 	}, nil
 }
 
-func listModels(args map[string]interface{}) (interface{}, error) {
+func listModels(ctx context.Context, _ map[string]interface{}) (interface{}, error) {
 
 	k8sClient, err := k8s.GetClient()
 	if err != nil {
@@ -186,8 +194,7 @@ func listModels(args map[string]interface{}) (interface{}, error) {
 
 	list := &infrav1.AIDeploymentList{}
 
-	err = k8sClient.List(context.Background(), list)
-	if err != nil {
+	if err := k8sClient.List(ctx, list); err != nil {
 		return nil, err
 	}
 
@@ -200,9 +207,12 @@ func listModels(args map[string]interface{}) (interface{}, error) {
 	return models, nil
 }
 
-func modelStatus(args map[string]interface{}) (interface{}, error) {
+func modelStatus(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 
-	model := args["model"].(string)
+	model, err := modelFromArgs(args)
+	if err != nil {
+		return nil, err
+	}
 
 	k8sClient, err := k8s.GetClient()
 	if err != nil {
@@ -211,13 +221,7 @@ func modelStatus(args map[string]interface{}) (interface{}, error) {
 
 	ai := &infrav1.AIDeployment{}
 
-	err = k8sClient.Get(
-		context.Background(),
-		clientKey(model),
-		ai,
-	)
-
-	if err != nil {
+	if err := k8sClient.Get(ctx, clientKey(model), ai); err != nil {
 		return nil, err
 	}
 

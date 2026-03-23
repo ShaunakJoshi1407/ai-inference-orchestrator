@@ -166,32 +166,29 @@ func (r *AIDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if apierrors.IsNotFound(err) {
 
-		newService := corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      serviceName,
-				Namespace: aiDeploy.Namespace,
-				Labels:    labels,
-			},
-			Spec: corev1.ServiceSpec{
-				Type:     corev1.ServiceTypeClusterIP,
-				Selector: labels,
-				Ports: []corev1.ServicePort{
-					{
-						Port:       8080,
-						TargetPort: intstr.FromInt(11434),
-					},
-				},
-			},
-		}
+		newService := r.buildService(&aiDeploy, labels)
 
-		if err := ctrl.SetControllerReference(&aiDeploy, &newService, r.Scheme); err != nil {
+		if err := ctrl.SetControllerReference(&aiDeploy, newService, r.Scheme); err != nil {
 			AIDeploymentReconcileErrors.WithLabelValues(req.Name, req.Namespace).Inc()
 			return ctrl.Result{}, err
 		}
 
-		if err := r.Create(ctx, &newService); err != nil {
+		if err := r.Create(ctx, newService); err != nil {
 			AIDeploymentReconcileErrors.WithLabelValues(req.Name, req.Namespace).Inc()
 			return ctrl.Result{}, err
+		}
+	} else if err != nil {
+		AIDeploymentReconcileErrors.WithLabelValues(req.Name, req.Namespace).Inc()
+		return ctrl.Result{}, err
+	} else {
+		desired := r.buildService(&aiDeploy, labels)
+		if service.Spec.Type != desired.Spec.Type || !reflect.DeepEqual(service.Spec.Ports, desired.Spec.Ports) {
+			service.Spec.Type = desired.Spec.Type
+			service.Spec.Ports = desired.Spec.Ports
+			if err := r.Update(ctx, &service); err != nil {
+				AIDeploymentReconcileErrors.WithLabelValues(req.Name, req.Namespace).Inc()
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
@@ -352,6 +349,11 @@ func (r *AIDeploymentReconciler) buildDeployment(
 		replicas = *aiDeploy.Spec.Replicas
 	}
 
+	image := "ollama/ollama:latest"
+	if aiDeploy.Spec.Image != nil {
+		image = *aiDeploy.Spec.Image
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-deployment", aiDeploy.Name),
@@ -370,10 +372,16 @@ func (r *AIDeploymentReconciler) buildDeployment(
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:      "ollama",
-							Image:     "ollama/ollama:latest",
-							Command:   []string{"ollama"},
-							Args:      []string{"serve"},
+							Name:    "ollama",
+							Image:   image,
+							Command: []string{"ollama"},
+							Args:    []string{"serve"},
+							Env: []corev1.EnvVar{
+								{
+									Name:  "MODEL",
+									Value: aiDeploy.Spec.Model,
+								},
+							},
 							Resources: containerResources,
 							Ports: []corev1.ContainerPort{
 								{ContainerPort: 11434},
@@ -403,6 +411,40 @@ func deploymentsEqual(current, desired *appsv1.Deployment) bool {
 	}
 
 	return true
+}
+
+func (r *AIDeploymentReconciler) buildService(
+	aiDeploy *infrav1.AIDeployment,
+	labels map[string]string,
+) *corev1.Service {
+
+	serviceType := corev1.ServiceTypeClusterIP
+	if aiDeploy.Spec.ServiceType != nil {
+		serviceType = *aiDeploy.Spec.ServiceType
+	}
+
+	port := int32(8080)
+	if aiDeploy.Spec.Port != nil {
+		port = *aiDeploy.Spec.Port
+	}
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-service", aiDeploy.Name),
+			Namespace: aiDeploy.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:     serviceType,
+			Selector: labels,
+			Ports: []corev1.ServicePort{
+				{
+					Port:       port,
+					TargetPort: intstr.FromInt(11434),
+				},
+			},
+		},
+	}
 }
 
 func ptrInt32(i int32) *int32 {

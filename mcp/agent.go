@@ -31,7 +31,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := t.Handler(args)
+	result, err := t.Handler(r.Context(), args)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
