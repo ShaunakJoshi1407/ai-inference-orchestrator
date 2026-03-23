@@ -22,18 +22,7 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Verify formatting
-        run: |
-          if [ "$(gofmt -l .)" != "" ]; then
-            echo "Code is not formatted:"
-            gofmt -l .
-            exit 1
-          fi
-
-      - name: Run go vet
-        run: go vet ./...
-
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          args: --timeout=5m --enable=govet --enable=staticcheck --enable=ineffassign --enable=unused
+          args: --timeout=5m

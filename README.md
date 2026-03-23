@@ -24,6 +24,14 @@ The controller continuously reconciles the desired state into:
 - A Kubernetes **Service**
 - A Kubernetes **HorizontalPodAutoscaler** (when autoscaling is enabled)
 
+It follows Kubernetes controller best practices:
+
+- Idempotent reconciliation — safe to run repeatedly
+- Drift detection — updates owned resources when spec changes
+- HPA-safe replica management — never overwrites replicas managed by autoscaler
+- Conflict-safe status updates via retry-on-conflict
+- Owner references — child resources are garbage-collected when the CR is deleted
+
 ---
 
 ## Architecture
@@ -44,11 +52,9 @@ The controller continuously reconciles the desired state into:
           ▼            ▼            ▼
       Deployment    Service        HPA
                        │
-                       ▼
-              Status Propagation
-                       │
-                       ▼
-            Prometheus Metrics
+          ┌────────────┘
+          ▼
+  Status Propagation → Prometheus Metrics
 ```
 
 The controller:
@@ -89,7 +95,7 @@ spec:
     targetCPUUtilization: 60
 ```
 
-### Field behaviour
+### Field behavior
 
 | Field | Default | Notes |
 |-------|---------|-------|
@@ -167,9 +173,9 @@ The project includes an HTTP tool server that exposes infrastructure operations 
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `POST /tools` | POST | Invoke a tool by name |
-| `GET /tools/list` | GET | List available tools |
-| `POST /agent` | POST | Natural language interface |
+| `/tools` | POST | Invoke a tool by name |
+| `/tools/list` | GET | List available tools |
+| `/agent` | POST | Natural language interface |
 
 **Available tools:**
 
@@ -275,7 +281,7 @@ SUCCESS! -- 11 Passed | 0 Failed | 0 Pending | 0 Skipped
 
 ## Local Development
 
-**Prerequisites:** Go 1.21+, kubectl, a running Kubernetes cluster (kind works well)
+**Prerequisites:** Go 1.25+, kubectl, a running Kubernetes cluster (kind works well)
 
 ```bash
 # Install CRD into cluster
@@ -302,24 +308,15 @@ go run ./mcp
 
 ---
 
-## Features
+## Capabilities
 
-### v0.1
-- Custom CRD with OpenAPI schema validation
-- Deployment and Service reconciliation with drift detection
-- Immutable-field-safe update logic
-- Status conditions propagated from underlying Deployment
-- Controller-runtime architecture with owner references
-
-### v0.2
-- HorizontalPodAutoscaler integration
-- HPA-safe replica management
-- Conflict-safe status updates via retry-on-conflict
-- Prometheus metrics — reconciliation and business-level
-
-### v1.0
+- Custom CRD (`AIDeployment`) with OpenAPI schema validation
+- Deployment, Service, and HPA reconciliation with drift detection
+- Idempotent, conflict-safe controller following Kubernetes best practices
+- HPA integration with stabilization windows tuned for AI workloads
+- Status conditions propagated from underlying Deployment readiness
+- Prometheus metrics for reconciliation health and business state
 - `aictl` CLI for direct cluster management
-- HTTP tool server with 5 model lifecycle tools
-- Natural language agent endpoint
-- `spec.image`, `spec.port`, and `spec.serviceType` fields fully reconciled
-- Context propagation and safe error handling throughout tool server
+- HTTP tool server exposing 5 model lifecycle operations
+- Natural language agent endpoint backed by keyword-based intent parsing
+- Owner references for automatic garbage collection of child resources
